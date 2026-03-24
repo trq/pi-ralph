@@ -1,0 +1,41 @@
+{
+  "project": "PRD Smoke Test: File Creation",
+  "description": "Simple test PRD with five independent stories. Each story is complete when a single file is created with the expected text.",
+  "stories": [
+    {
+      "id": "S1",
+      "priority": 1,
+      "title": "Create alpha test file",
+      "passes": true,
+      "task": "Create file test-output/alpha.txt containing exactly: Hello from task 1"
+    },
+    {
+      "id": "S2",
+      "priority": 2,
+      "title": "Create bravo test file",
+      "passes": true,
+      "task": "Create file test-output/bravo.txt containing exactly: Hello from task 2"
+    },
+    {
+      "id": "S3",
+      "priority": 3,
+      "title": "Create charlie test file",
+      "passes": true,
+      "task": "Create file test-output/charlie.txt containing exactly: Hello from task 3"
+    },
+    {
+      "id": "S4",
+      "priority": 4,
+      "title": "Create delta test file",
+      "passes": true,
+      "task": "Create file test-output/delta.txt containing exactly: Hello from task 4"
+    },
+    {
+      "id": "S5",
+      "priority": 5,
+      "title": "Create echo test file",
+      "passes": true,
+      "task": "Create file test-output/echo.txt containing exactly: Hello from task 5"
+    }
+  ]
+}
