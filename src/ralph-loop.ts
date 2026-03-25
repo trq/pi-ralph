@@ -7,12 +7,16 @@ import { fileURLToPath } from "node:url";
 import {
   AuthStorage,
   createAgentSession,
+  initTheme,
   ModelRegistry,
   SessionManager,
   SettingsManager,
+  ToolExecutionComponent,
 } from "@mariozechner/pi-coding-agent";
+import { Container, ProcessTerminal, Spacer, Text, TUI } from "@mariozechner/pi-tui";
 import { getModel, getProviders } from "@mariozechner/pi-ai";
 import type { KnownProvider } from "@mariozechner/pi-ai";
+import type { AgentSession } from "@mariozechner/pi-coding-agent";
 import { formatBlockedSummary, loadPlanQueue, resolvePlanPath } from "./plan-queue";
 
 type CliOptions = {
@@ -161,6 +165,38 @@ function writeProgress(text: string): void {
   process.stdout.write(text);
 }
 
+function formatJsonInline(value: unknown, maxLen = 220): string {
+  let text: string;
+  try {
+    text = JSON.stringify(value);
+  } catch {
+    text = String(value);
+  }
+
+  if (text.length <= maxLen) return text;
+  return `${text.slice(0, Math.max(0, maxLen - 3))}...`;
+}
+
+function formatModelLabel(model: unknown): string {
+  if (!model || typeof model !== "object") return "(unknown)";
+
+  const record = model as Record<string, unknown>;
+  const provider = typeof record.provider === "string" ? record.provider : undefined;
+  const id =
+    typeof record.id === "string"
+      ? record.id
+      : typeof record.modelId === "string"
+        ? record.modelId
+        : typeof record.name === "string"
+          ? record.name
+          : undefined;
+
+  if (provider && id) return `${provider}/${id}`;
+  if (id) return id;
+
+  return formatJsonInline(model, 120);
+}
+
 function isCompleteMarker(text: string): boolean {
   return text.includes("<promise>COMPLETE</promise>");
 }
@@ -266,6 +302,188 @@ Runtime context:
 - If a story is partially complete, keep status as \`in_progress\` and append clear progress/blockers to the Ralph Progress Log section.`;
 }
 
+async function promptWithPlainProgress(session: AgentSession, promptText: string, showThinking: boolean): Promise<string> {
+  let assistantText = "";
+  let thinkingNoticeShown = false;
+  let turnCount = 0;
+  const toolExecutions = new Map<string, { startedAtMs: number; toolName: string }>();
+
+  const unsubscribe = session.subscribe((event: AgentEvent) => {
+    if (event.type === "turn_start") {
+      turnCount += 1;
+      writeLine(`\n[turn ${turnCount}] start`);
+      return;
+    }
+
+    if (event.type === "turn_end") {
+      const maybeToolResults = (event as { toolResults?: unknown }).toolResults;
+      const toolResults = Array.isArray(maybeToolResults) ? maybeToolResults.length : 0;
+      writeLine(`\n[turn ${turnCount}] end (tool_results=${toolResults})`);
+      return;
+    }
+
+    if (event.type === "message_update") {
+      const assistantMessageEvent = event.assistantMessageEvent as { type: string; delta?: string };
+      if (assistantMessageEvent.type === "text_delta" && typeof assistantMessageEvent.delta === "string") {
+        assistantText += assistantMessageEvent.delta;
+        writeProgress(assistantMessageEvent.delta);
+        return;
+      }
+      if (assistantMessageEvent.type === "thinking_start") {
+        if (showThinking) {
+          writeLine("\n[thinking:start]");
+        } else if (!thinkingNoticeShown) {
+          writeLine("\n[thinking] hidden (pass --show-thinking to stream model thinking)");
+          thinkingNoticeShown = true;
+        }
+        return;
+      }
+      if (showThinking && assistantMessageEvent.type === "thinking_delta" && typeof assistantMessageEvent.delta === "string") {
+        writeProgress(assistantMessageEvent.delta);
+        return;
+      }
+      if (showThinking && assistantMessageEvent.type === "thinking_end") {
+        writeLine("\n[thinking:end]");
+      }
+      return;
+    }
+
+    if (event.type === "tool_execution_start") {
+      const toolName = typeof event.toolName === "string" ? event.toolName : "tool";
+      const toolCallId = typeof event.toolCallId === "string" ? event.toolCallId : toolName;
+      const argsPreview = formatJsonInline(event.args, 260);
+      toolExecutions.set(toolCallId, { startedAtMs: Date.now(), toolName });
+      writeLine(`\n[tool:start] ${toolName}#${toolCallId} args=${argsPreview}`);
+      return;
+    }
+
+    if (event.type === "tool_execution_update") {
+      const toolName = typeof event.toolName === "string" ? event.toolName : "tool";
+      const toolCallId = typeof event.toolCallId === "string" ? event.toolCallId : toolName;
+      const partialPreview = formatJsonInline(event.partialResult, 260);
+      writeLine(`[tool:update] ${toolName}#${toolCallId} partial=${partialPreview}`);
+      return;
+    }
+
+    if (event.type === "tool_execution_end") {
+      const toolName = typeof event.toolName === "string" ? event.toolName : "tool";
+      const toolCallId = typeof event.toolCallId === "string" ? event.toolCallId : toolName;
+      const status = event.isError ? "error" : "ok";
+      const run = toolExecutions.get(toolCallId);
+      const elapsedMs = run ? Date.now() - run.startedAtMs : undefined;
+      toolExecutions.delete(toolCallId);
+
+      const resultPreview = formatJsonInline(event.result, 260);
+      const timingText = typeof elapsedMs === "number" ? ` in ${elapsedMs}ms` : "";
+      writeLine(`[tool:end] ${toolName}#${toolCallId} (${status})${timingText} result=${resultPreview}`);
+      return;
+    }
+
+    if (event.type === "agent_start") {
+      writeLine("[agent] started");
+      return;
+    }
+
+    if (event.type === "agent_end") {
+      writeLine("\n[agent] finished");
+    }
+  });
+
+  try {
+    await session.prompt(promptText);
+  } finally {
+    unsubscribe();
+  }
+
+  return assistantText;
+}
+
+async function promptWithPiLikeProgress(session: AgentSession, promptText: string, showThinking: boolean, cwd: string): Promise<string> {
+  if (!process.stdout.isTTY || !process.stdin.isTTY) {
+    return promptWithPlainProgress(session, promptText, showThinking);
+  }
+
+  initTheme(undefined, false);
+  const ui = new TUI(new ProcessTerminal());
+  const chat = new Container();
+  const streamingText = new Text("", 1, 0);
+  chat.addChild(streamingText);
+
+  ui.addChild(new Spacer(1));
+  ui.addChild(chat);
+  ui.addChild(new Spacer(1));
+  ui.start();
+
+  let assistantText = "";
+  let thinkingNoticeShown = false;
+  const pendingTools = new Map<string, ToolExecutionComponent>();
+
+  const unsubscribe = session.subscribe((event: AgentEvent) => {
+    if (event.type === "message_update") {
+      const assistantMessageEvent = event.assistantMessageEvent as { type: string; delta?: string };
+      if (assistantMessageEvent.type === "text_delta" && typeof assistantMessageEvent.delta === "string") {
+        assistantText += assistantMessageEvent.delta;
+        streamingText.setText(assistantText);
+        ui.requestRender();
+        return;
+      }
+
+      if (assistantMessageEvent.type === "thinking_start" && !showThinking && !thinkingNoticeShown) {
+        chat.addChild(new Text("[thinking hidden]", 1, 0));
+        thinkingNoticeShown = true;
+        ui.requestRender();
+        return;
+      }
+
+      return;
+    }
+
+    if (event.type === "tool_execution_start") {
+      const toolName = typeof event.toolName === "string" ? event.toolName : "tool";
+      const toolCallId = typeof event.toolCallId === "string" ? event.toolCallId : toolName;
+      let component = pendingTools.get(toolCallId);
+      if (!component) {
+        component = new ToolExecutionComponent(toolName, toolCallId, event.args, { showImages: false }, undefined, ui, cwd);
+        component.setExpanded(true);
+        pendingTools.set(toolCallId, component);
+        chat.addChild(component);
+      }
+      component.markExecutionStarted();
+      ui.requestRender();
+      return;
+    }
+
+    if (event.type === "tool_execution_update") {
+      const toolCallId = typeof event.toolCallId === "string" ? event.toolCallId : "";
+      const component = pendingTools.get(toolCallId);
+      if (component) {
+        component.updateResult({ ...(event.partialResult as Record<string, unknown>), isError: false } as never, true);
+        ui.requestRender();
+      }
+      return;
+    }
+
+    if (event.type === "tool_execution_end") {
+      const toolCallId = typeof event.toolCallId === "string" ? event.toolCallId : "";
+      const component = pendingTools.get(toolCallId);
+      if (component) {
+        component.updateResult({ ...(event.result as Record<string, unknown>), isError: Boolean(event.isError) } as never);
+        pendingTools.delete(toolCallId);
+        ui.requestRender();
+      }
+    }
+  });
+
+  try {
+    await session.prompt(promptText);
+  } finally {
+    unsubscribe();
+    ui.stop();
+  }
+
+  return assistantText || session.getLastAssistantText() || "";
+}
+
 async function main(): Promise<number> {
   const opts = parseArgs(process.argv.slice(2));
   const prompt = await readPrompt(opts.promptPath);
@@ -331,53 +549,20 @@ async function main(): Promise<number> {
       ...(opts.thinkingLevel ? { thinkingLevel: opts.thinkingLevel as never } : {}),
     });
 
+    const runtimeModel = formatModelLabel(session.agent.state.model as unknown);
+    const runtimeThinking = String(session.agent.state.thinkingLevel ?? opts.thinkingLevel ?? "default");
+    const usingTui = Boolean(process.stdout.isTTY && process.stdin.isTTY);
+    writeLine(
+      `Runtime: model=${runtimeModel} | thinking=${runtimeThinking} | renderer=${usingTui ? "pi-like-tui" : "plain"}${
+        !usingTui ? ` | thinking_stream=${opts.showThinking ? "on" : "off"}` : ""
+      }`,
+    );
+
     let assistantText = "";
-
-    const unsubscribe = session.subscribe((event: AgentEvent) => {
-      if (event.type === "message_update") {
-        const assistantMessageEvent = event.assistantMessageEvent as { type: string; delta?: string };
-        if (assistantMessageEvent.type === "text_delta" && typeof assistantMessageEvent.delta === "string") {
-          assistantText += assistantMessageEvent.delta;
-          writeProgress(assistantMessageEvent.delta);
-          return;
-        }
-        if (
-          opts.showThinking &&
-          assistantMessageEvent.type === "thinking_delta" &&
-          typeof assistantMessageEvent.delta === "string"
-        ) {
-          writeProgress(assistantMessageEvent.delta);
-        }
-        return;
-      }
-
-      if (event.type === "tool_execution_start") {
-        const toolName = typeof event.toolName === "string" ? event.toolName : "tool";
-        writeLine(`\n[tool:start] ${toolName}`);
-        return;
-      }
-
-      if (event.type === "tool_execution_end") {
-        const toolName = typeof event.toolName === "string" ? event.toolName : "tool";
-        const status = event.isError ? "error" : "ok";
-        writeLine(`\n[tool:end] ${toolName} (${status})`);
-        return;
-      }
-
-      if (event.type === "agent_start") {
-        writeLine("[agent] started");
-        return;
-      }
-
-      if (event.type === "agent_end") {
-        writeLine("\n[agent] finished");
-      }
-    });
-
     try {
-      await session.prompt(buildIterationPrompt(prompt, planPath, targetStory.id));
+      const iterationPrompt = buildIterationPrompt(prompt, planPath, targetStory.id);
+      assistantText = await promptWithPiLikeProgress(session, iterationPrompt, opts.showThinking, opts.cwd);
     } finally {
-      unsubscribe();
       session.dispose();
     }
 

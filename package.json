@@ -14,7 +14,8 @@
   },
   "dependencies": {
     "@mariozechner/pi-coding-agent": "^0.62.0",
-    "@mariozechner/pi-ai": "^0.62.0"
+    "@mariozechner/pi-ai": "^0.62.0",
+    "@mariozechner/pi-tui": "^0.62.0"
   },
   "devDependencies": {
     "tsx": "^4.20.5",

@@ -10,7 +10,7 @@ Per iteration:
 1. Starts a new in-memory Pi session (fresh context)
 2. Runs the Ralph prompt (`prompts/ralph-loop.md`)
 3. Streams assistant output to stdout as tokens arrive
-4. Streams tool lifecycle events (`tool:start`, `tool:end`)
+4. Streams tool progress (plain logs or Pi TUI renderer)
 5. Creates a git commit for the iteration (`--allow-empty`)
 6. Stops early when all plan stories are `done`
 
@@ -84,6 +84,8 @@ npm run start -- \
   --thinking medium \
   --show-thinking
 ```
+
+Ralph uses a non-interactive Pi-style TUI renderer when running in a TTY, and falls back to plain streaming logs in non-interactive environments.
 
 ## Plan lint
 
