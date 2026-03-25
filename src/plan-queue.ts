@@ -88,10 +88,10 @@ export async function resolvePlanPath(cwd: string, explicitPlanPath?: string): P
 export async function loadPlanQueue(planPath: string): Promise<PlanQueue> {
   const content = await fs.readFile(planPath, "utf8");
   const lines = content.split(/\r?\n/);
-  const headingIndex = lines.findIndex((line) => /^##\s+Ralph Queue\s*$/i.test(line.trim()));
+  const headingIndex = lines.findIndex((line) => /^##\s+AFK Loop Queue\s*$/i.test(line.trim()));
 
   if (headingIndex < 0) {
-    throw new Error(`Plan file ${planPath} is missing required section: \"## Ralph Queue\".`);
+    throw new Error(`Plan file ${planPath} is missing required section: \"## AFK Loop Queue\".`);
   }
 
   const tableLines: string[] = [];
@@ -116,7 +116,7 @@ export async function loadPlanQueue(planPath: string): Promise<PlanQueue> {
   }
 
   if (tableLines.length < 3) {
-    throw new Error(`Plan file ${planPath} has an invalid Ralph Queue table (need header, separator, and at least one story row).`);
+    throw new Error(`Plan file ${planPath} has an invalid AFK Loop Queue table (need header, separator, and at least one story row).`);
   }
 
   const headers = parseTableRow(tableLines[0] ?? "").map(normalizeHeaderKey);
@@ -125,7 +125,7 @@ export async function loadPlanQueue(planPath: string): Promise<PlanQueue> {
 
   for (const column of requiredColumns) {
     if (!headerIndex.has(column)) {
-      throw new Error(`Plan file ${planPath} Ralph Queue is missing required column: ${column}`);
+      throw new Error(`Plan file ${planPath} AFK Loop Queue is missing required column: ${column}`);
     }
   }
 
@@ -140,7 +140,7 @@ export async function loadPlanQueue(planPath: string): Promise<PlanQueue> {
     const blockedByRaw = headerIndex.has("blocked_by") ? row[headerIndex.get("blocked_by") ?? -1] ?? "" : "";
 
     if (!id) {
-      throw new Error(`Plan file ${planPath} has a Ralph Queue row with empty id.`);
+      throw new Error(`Plan file ${planPath} has an AFK Queue row with empty id.`);
     }
 
     const priority = Number.parseInt(priorityRaw, 10);
@@ -167,12 +167,12 @@ export async function loadPlanQueue(planPath: string): Promise<PlanQueue> {
 
   for (const story of stories) {
     if (ids.has(story.id)) {
-      throw new Error(`Plan file ${planPath} has duplicate Ralph Queue story id: ${story.id}`);
+      throw new Error(`Plan file ${planPath} has duplicate AFK Loop Queue story id: ${story.id}`);
     }
     ids.add(story.id);
 
     if (priorities.has(story.priority)) {
-      throw new Error(`Plan file ${planPath} has duplicate Ralph Queue priority: ${story.priority}`);
+      throw new Error(`Plan file ${planPath} has duplicate AFK Loop Queue priority: ${story.priority}`);
     }
     priorities.add(story.priority);
   }

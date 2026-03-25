@@ -51,7 +51,7 @@ function parseArgs(argv: string[]): CliOptions {
 }
 
 function printHelpAndExit(): never {
-  console.log(`pi-ralph-plan-lint
+  console.log(`pi-afk-plan-lint
 
 Usage:
   npm run plan-lint -- [--cwd <dir>] [--plan <file>] [--json]

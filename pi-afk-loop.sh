@@ -15,12 +15,12 @@ done
 SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 
 if [[ ! -f "$SCRIPT_DIR/package.json" ]]; then
-  echo "Could not find package.json in Ralph directory: $SCRIPT_DIR" >&2
+  echo "Could not find package.json in AFK directory: $SCRIPT_DIR" >&2
   exit 1
 fi
 
 if [[ ! -d "$SCRIPT_DIR/node_modules" ]]; then
-  echo "Installing Ralph dependencies..."
+  echo "Installing AFK dependencies..."
   (cd "$SCRIPT_DIR" && npm install)
 fi
 
@@ -29,4 +29,4 @@ if [[ "${1:-}" == "plan-lint" ]]; then
   exec "$SCRIPT_DIR/node_modules/.bin/tsx" "$SCRIPT_DIR/src/plan-lint.ts" "$@"
 fi
 
-exec "$SCRIPT_DIR/node_modules/.bin/tsx" "$SCRIPT_DIR/src/ralph-loop.ts" "$@"
+exec "$SCRIPT_DIR/node_modules/.bin/tsx" "$SCRIPT_DIR/src/afk-loop.ts" "$@"

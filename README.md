@@ -1,6 +1,6 @@
-# Pi Ralph Loop
+# Pi AFK Loop (Away From Keyboard)
 
-A Ralph-style autonomous coding loop implemented with the **Pi harness SDK**.
+An AFK-style autonomous coding loop implemented with the **Pi harness SDK**.
 
 It repeatedly creates a **fresh Pi session** (clean context each iteration), asks the agent to complete one unfinished plan story, and streams live progress to stdout.
 
@@ -8,7 +8,7 @@ It repeatedly creates a **fresh Pi session** (clean context each iteration), ask
 
 Per iteration:
 1. Starts a new in-memory Pi session (fresh context)
-2. Runs the Ralph prompt (`prompts/ralph-loop.md`)
+2. Runs the AFK prompt (`prompts/afk-loop.md`)
 3. Streams assistant output to stdout as tokens arrive
 4. Streams tool progress (plain logs or Pi TUI renderer)
 5. Creates a git commit for the iteration (`--allow-empty`)
@@ -22,12 +22,12 @@ Persistent memory between iterations is your repo state (`git`, plan markdown wi
 - Pi-compatible auth configured (API key env var or `~/.pi/agent/auth.json`)
 - Feature repo with:
   - a plan markdown file (auto-detected from `docs/prds/*_plan.md`, or passed via `--plan`)
-  - `## Ralph Queue` and `## Ralph Progress Log` sections in that plan
+  - `## AFK Loop Queue` and `## AFK Loop Progress Log` sections in that plan
   - a clean git working tree before starting the loop
 
-## Ralph plan format
+## AFK plan format
 
-Your selected plan markdown must include a `## Ralph Queue` section with a Markdown table.
+Your selected plan markdown must include a `## AFK Loop Queue` section with a Markdown table.
 
 Required columns:
 
@@ -43,7 +43,7 @@ Optional columns:
 Example:
 
 ```md
-## Ralph Queue
+## AFK Loop Queue
 
 | id | priority | status | title | blocked_by |
 |---|---:|---|---|---|
@@ -52,7 +52,7 @@ Example:
 | S3 | 3 | todo | Deterministic Normalization Slice | S1 |
 | S4 | 4 | todo | API Guardrail + Readiness Slice | S2,S3 |
 
-## Ralph Progress Log
+## AFK Loop Progress Log
 
 - 2026-03-25T00:00:00.000Z Initialized.
 ```
@@ -69,9 +69,9 @@ npm install
 npm run start -- --cwd /path/to/feature-repo --iterations 10
 ```
 
-By default Ralph uses its built-in prompt at `~/src/trq/ai/ralph/prompts/ralph-loop.md` (resolved from the install location), so `--prompt` is optional.
+By default AFK uses its built-in prompt at `prompts/afk-loop.md` (resolved from the install location), so `--prompt` is optional.
 
-Ralph commits once per iteration by default. Commit format is `ralph(<story-id>): <status> - <title>`, with a short body that includes iteration metadata and an agent-written summary of what was done.
+AFK commits once per iteration by default. Commit format is `afk(<story-id>): <status> - <title>`, with a short body that includes iteration metadata and an agent-written summary of what was done.
 
 Optional:
 
@@ -85,11 +85,11 @@ npm run start -- \
   --show-thinking
 ```
 
-Ralph uses a non-interactive Pi-style TUI renderer when running in a TTY, and falls back to plain streaming logs in non-interactive environments.
+AFK uses a non-interactive Pi-style TUI renderer when running in a TTY, and falls back to plain streaming logs in non-interactive environments.
 
 ## Plan lint
 
-Validate that a plan has a parseable `## Ralph Queue` with valid dependencies:
+Validate that a plan has a parseable `## AFK Queue` with valid dependencies:
 
 ```bash
 npm run plan-lint -- --cwd /path/to/feature-repo --plan docs/prds/my-feature_plan.md
@@ -101,34 +101,34 @@ JSON summary output:
 npm run plan-lint -- --cwd /path/to/feature-repo --json
 ```
 
-## Run Ralph from anywhere
+## Run AFK from anywhere
 
 Use the wrapper script and symlink it into your PATH:
 
 ```bash
-ln -sf ~/src/trq/ai/ralph/ralph-pi.sh ~/bin/ralph
-chmod +x ~/bin/ralph
+ln -sf /path/to/afk-loop/afk-pi.sh ~/bin/afk
+chmod +x ~/bin/afk
 ```
 
 Then run from any directory:
 
 ```bash
-ralph --cwd /path/to/feature-repo --iterations 10
-ralph plan-lint --cwd /path/to/feature-repo
+afk --cwd /path/to/feature-repo --iterations 10
+afk plan-lint --cwd /path/to/feature-repo
 ```
 
-The wrapper resolves symlinks to the real Ralph install directory, so it no longer depends on your current working directory.
+The wrapper resolves symlinks to the real AFK install directory, so it no longer depends on your current working directory.
 
 ## Files
 
-- `src/ralph-loop.ts` - loop controller using Pi SDK
+- `src/afk-loop.ts` - loop controller using Pi SDK
 - `src/plan-queue.ts` - plan queue parser and validation
 - `src/plan-lint.ts` - queue lint command
-- `prompts/ralph-loop.md` - per-iteration instructions for the agent
+- `prompts/afk-loop.md` - per-iteration instructions for the agent
 - `AGENTS.md` - project conventions
 
 ## Notes
 
-- Each iteration is intentionally isolated (fresh context), matching the Ralph pattern.
+- Each iteration is intentionally isolated (fresh context), matching the AFK pattern.
 - Progress is visible in real time on stdout.
 - Completion marker remains: `<promise>COMPLETE</promise>`.

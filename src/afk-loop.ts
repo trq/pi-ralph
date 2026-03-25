@@ -34,7 +34,7 @@ type AgentEvent = {
   [key: string]: unknown;
 };
 
-const defaultPromptPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../prompts/ralph-loop.md");
+const defaultPromptPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../prompts/afk-loop.md");
 const execFileAsync = promisify(execFile);
 
 function parseArgs(argv: string[]): CliOptions {
@@ -114,15 +114,15 @@ function parseArgs(argv: string[]): CliOptions {
 }
 
 function printHelpAndExit(): never {
-  console.log(`pi-ralph
+  console.log(`pi-afk
 
 Usage:
-  pi-ralph [--cwd <dir>] [--iterations <n>] [--prompt <file>] [--plan <file>] [--model <id>] [--thinking <level>] [--show-thinking]
+  pi-afk [--cwd <dir>] [--iterations <n>] [--prompt <file>] [--plan <file>] [--model <id>] [--thinking <level>] [--show-thinking]
 
 Options:
   --cwd <dir>           Working directory for the feature repo (default: current dir)
-  --iterations <n>      Maximum Ralph iterations (default: 10)
-  --prompt <file>       Prompt file to use (default: Ralph's built-in prompts/ralph-loop.md)
+  --iterations <n>      Maximum AFK iterations (default: 10)
+  --prompt <file>       Prompt file to use (default: AFK's built-in prompts/afk-loop.md)
   --plan <file>         Plan markdown file (default: auto-detect docs/prds/*_plan.md)
   --model <id>          Override model
   --thinking <level>    Override thinking level
@@ -150,9 +150,9 @@ async function ensureProjectFiles(planPath: string): Promise<void> {
 
   const planContent = await fs.readFile(planPath, "utf8");
 
-  if (!/^##\s+Ralph Progress Log\s*$/im.test(planContent)) {
+  if (!/^##\s+AFK Loop Progress Log\s*$/im.test(planContent)) {
     throw new Error(
-      `Plan file ${planPath} is missing required section: \"## Ralph Progress Log\". Add it to the plan before running Ralph.`,
+      `Plan file ${planPath} is missing required section: \"## AFK Loop Progress Log\". Add it to the plan before running AFK.`,
     );
   }
 }
@@ -238,7 +238,7 @@ async function assertWorkingTreeClean(cwd: string): Promise<void> {
   const status = await runGit(cwd, ["status", "--porcelain"]);
   if (status.length > 0) {
     throw new Error(
-      "Working tree is not clean. Commit or stash existing changes before running Ralph so each iteration commit is isolated.",
+      "Working tree is not clean. Commit or stash existing changes before running AFK so each iteration commit is isolated.",
     );
   }
 }
@@ -274,7 +274,7 @@ async function commitIteration(opts: {
 
   await runGit(cwd, ["add", "-A"]);
 
-  const subject = `ralph(${targetStoryId}): ${storyStatusAfter} - ${targetStoryTitle}`;
+  const subject = `afk(${targetStoryId}): ${storyStatusAfter} - ${targetStoryTitle}`;
   const summary = summarizeAgentOutput(assistantText);
   const body = [
     `Iteration: ${iteration}`,
@@ -293,13 +293,13 @@ function buildIterationPrompt(basePrompt: string, planPath: string, targetStory:
 
 Runtime context:
 - Plan file: ${planPath}
-- Use the \"## Ralph Queue\" table as source of truth for story status.
+- Use the \"## AFK Loop Queue\" table as source of truth for story status.
 - Story statuses: todo, in_progress, blocked, done.
 - \`blocked_by\` is a comma-separated list of story ids that must be done first.
 - Focus only on this target story this iteration: ${targetStory}
-- Use the \"## Ralph Progress Log\" section in the plan for iteration notes.
-- When a story is complete, set its status to \`done\` in the Ralph Queue table and append learnings to the Ralph Progress Log section.
-- If a story is partially complete, keep status as \`in_progress\` and append clear progress/blockers to the Ralph Progress Log section.`;
+- Use the \"## AFK Loop Progress Log\" section in the plan for iteration notes.
+- When a story is complete, set its status to \`done\` in the AFK Loop Queue table and append learnings to the AFK Loop Progress Log section.
+- If a story is partially complete, keep status as \`in_progress\` and append clear progress/blockers to the AFK Loop Progress Log section.`;
 }
 
 async function promptWithPlainProgress(session: AgentSession, promptText: string, showThinking: boolean): Promise<string> {
@@ -502,7 +502,7 @@ async function main(): Promise<number> {
     (settingsManager as any).applyOverrides?.({ thinkingLevel: opts.thinkingLevel });
   }
 
-  writeLine(`Ralph loop starting in ${opts.cwd}`);
+  writeLine(`AFK loop starting in ${opts.cwd}`);
   writeLine(`Prompt: ${opts.promptPath}`);
   writeLine(`Plan: ${planPath}`);
   writeLine(`Iterations: ${opts.iterations}`);
@@ -515,7 +515,7 @@ async function main(): Promise<number> {
 
     if (queueBefore.allDone) {
       writeLine("");
-      writeLine("Ralph completed all tasks (all stories are done in the plan queue).");
+      writeLine("AFK completed all tasks (all stories are done in the plan queue).");
       return 0;
     }
 
@@ -528,7 +528,7 @@ async function main(): Promise<number> {
 
     writeLine("");
     writeLine("===============================================================");
-    writeLine(`  Ralph iteration ${iteration} of ${opts.iterations}`);
+    writeLine(`  AFK iteration ${iteration} of ${opts.iterations}`);
     writeLine("===============================================================");
 
     const targetStory = queueBefore.runnableStories[0]!;
@@ -583,7 +583,7 @@ async function main(): Promise<number> {
 
     if (queueAfter.allDone) {
       writeLine("");
-      writeLine("Ralph completed all tasks.");
+      writeLine("AFK completed all tasks.");
       return 0;
     }
 
@@ -596,7 +596,7 @@ async function main(): Promise<number> {
   }
 
   writeLine("");
-  writeLine(`Ralph reached max iterations (${opts.iterations}) without completing all tasks.`);
+  writeLine(`AFK reached max iterations (${opts.iterations}) without completing all tasks.`);
   return 1;
 }
 
@@ -605,7 +605,7 @@ main()
     process.exitCode = code;
   })
   .catch((error: unknown) => {
-    console.error("Ralph loop failed:");
+    console.error("AFK loop failed:");
     if (error instanceof Error) {
       console.error(error.stack ?? error.message);
     } else {

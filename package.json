@@ -1,16 +1,16 @@
 {
-  "name": "pi-ralph-loop",
+  "name": "pi-afk-loop",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "tsx src/ralph-loop.ts",
+    "start": "tsx src/afk-loop.ts",
     "plan-lint": "tsx src/plan-lint.ts",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "bin": {
-    "ralph": "./ralph-pi.sh"
+    "afk": "./pi-afk-loop.sh"
   },
   "dependencies": {
     "@mariozechner/pi-coding-agent": "^0.62.0",
