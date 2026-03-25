@@ -2,7 +2,7 @@
 
 A Ralph-style autonomous coding loop implemented with the **Pi harness SDK**.
 
-It repeatedly creates a **fresh Pi session** (clean context each iteration), asks the agent to complete one unfinished PRD story, and streams live progress to stdout.
+It repeatedly creates a **fresh Pi session** (clean context each iteration), asks the agent to complete one unfinished plan story, and streams live progress to stdout.
 
 ## What it does
 
@@ -11,17 +11,51 @@ Per iteration:
 2. Runs the Ralph prompt (`prompts/ralph-loop.md`)
 3. Streams assistant output to stdout as tokens arrive
 4. Streams tool lifecycle events (`tool:start`, `tool:end`)
-5. Stops early when the agent outputs `<promise>COMPLETE</promise>`
+5. Creates a git commit for the iteration (`--allow-empty`)
+6. Stops early when all plan stories are `done`
 
-Persistent memory between iterations is your repo state (`git`, `prd.json`, `progress.txt`).
+Persistent memory between iterations is your repo state (`git`, plan markdown with queue + progress log).
 
 ## Requirements
 
 - Node 20+
 - Pi-compatible auth configured (API key env var or `~/.pi/agent/auth.json`)
 - Feature repo with:
-  - `prd.json`
-  - `progress.txt` (auto-created if missing)
+  - a plan markdown file (auto-detected from `docs/prds/*_plan.md`, or passed via `--plan`)
+  - `## Ralph Queue` and `## Ralph Progress Log` sections in that plan
+  - a clean git working tree before starting the loop
+
+## Ralph plan format
+
+Your selected plan markdown must include a `## Ralph Queue` section with a Markdown table.
+
+Required columns:
+
+- `id`
+- `priority` (integer; lower means earlier)
+- `status` (`todo`, `in_progress`, `blocked`, `done`)
+- `title`
+
+Optional columns:
+
+- `blocked_by` (comma-separated story ids that must be `done` first)
+
+Example:
+
+```md
+## Ralph Queue
+
+| id | priority | status | title | blocked_by |
+|---|---:|---|---|---|
+| S1 | 1 | todo | Contract Baseline Slice | - |
+| S2 | 2 | todo | Failure Semantics Slice | S1 |
+| S3 | 3 | todo | Deterministic Normalization Slice | S1 |
+| S4 | 4 | todo | API Guardrail + Readiness Slice | S2,S3 |
+
+## Ralph Progress Log
+
+- 2026-03-25T00:00:00.000Z Initialized.
+```
 
 ## Install
 
@@ -35,20 +69,59 @@ npm install
 npm run start -- --cwd /path/to/feature-repo --iterations 10
 ```
 
+By default Ralph uses its built-in prompt at `~/src/trq/ai/ralph/prompts/ralph-loop.md` (resolved from the install location), so `--prompt` is optional.
+
+Ralph commits once per iteration by default. Commit format is `ralph(<story-id>): <status> - <title>`, with a short body that includes iteration metadata and an agent-written summary of what was done.
+
 Optional:
 
 ```bash
 npm run start -- \
   --cwd /path/to/feature-repo \
+  --plan docs/prds/my-feature_plan.md \
   --iterations 20 \
   --model anthropic/claude-sonnet-4 \
   --thinking medium \
   --show-thinking
 ```
 
+## Plan lint
+
+Validate that a plan has a parseable `## Ralph Queue` with valid dependencies:
+
+```bash
+npm run plan-lint -- --cwd /path/to/feature-repo --plan docs/prds/my-feature_plan.md
+```
+
+JSON summary output:
+
+```bash
+npm run plan-lint -- --cwd /path/to/feature-repo --json
+```
+
+## Run Ralph from anywhere
+
+Use the wrapper script and symlink it into your PATH:
+
+```bash
+ln -sf ~/src/trq/ai/ralph/ralph-pi.sh ~/bin/ralph
+chmod +x ~/bin/ralph
+```
+
+Then run from any directory:
+
+```bash
+ralph --cwd /path/to/feature-repo --iterations 10
+ralph plan-lint --cwd /path/to/feature-repo
+```
+
+The wrapper resolves symlinks to the real Ralph install directory, so it no longer depends on your current working directory.
+
 ## Files
 
 - `src/ralph-loop.ts` - loop controller using Pi SDK
+- `src/plan-queue.ts` - plan queue parser and validation
+- `src/plan-lint.ts` - queue lint command
 - `prompts/ralph-loop.md` - per-iteration instructions for the agent
 - `AGENTS.md` - project conventions
 
@@ -56,4 +129,4 @@ npm run start -- \
 
 - Each iteration is intentionally isolated (fresh context), matching the Ralph pattern.
 - Progress is visible in real time on stdout.
-- Completion is signaled by exact marker: `<promise>COMPLETE</promise>`.
+- Completion marker remains: `<promise>COMPLETE</promise>`.

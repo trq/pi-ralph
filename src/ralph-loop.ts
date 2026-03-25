@@ -1,6 +1,9 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { fileURLToPath } from "node:url";
 import {
   AuthStorage,
   createAgentSession,
@@ -10,11 +13,13 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { getModel, getProviders } from "@mariozechner/pi-ai";
 import type { KnownProvider } from "@mariozechner/pi-ai";
+import { formatBlockedSummary, loadPlanQueue, resolvePlanPath } from "./plan-queue";
 
 type CliOptions = {
   cwd: string;
   iterations: number;
   promptPath: string;
+  planPath?: string;
   model?: string;
   thinkingLevel?: string;
   showThinking: boolean;
@@ -25,11 +30,14 @@ type AgentEvent = {
   [key: string]: unknown;
 };
 
+const defaultPromptPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../prompts/ralph-loop.md");
+const execFileAsync = promisify(execFile);
+
 function parseArgs(argv: string[]): CliOptions {
   const opts: CliOptions = {
     cwd: process.cwd(),
     iterations: 10,
-    promptPath: path.resolve(process.cwd(), "prompts/ralph-loop.md"),
+    promptPath: defaultPromptPath,
     showThinking: false,
   };
 
@@ -59,6 +67,14 @@ function parseArgs(argv: string[]): CliOptions {
     }
     if (arg.startsWith("--prompt=")) {
       opts.promptPath = path.resolve(arg.slice("--prompt=".length));
+      continue;
+    }
+    if (arg === "--plan") {
+      opts.planPath = argv[++i];
+      continue;
+    }
+    if (arg.startsWith("--plan=")) {
+      opts.planPath = arg.slice("--plan=".length);
       continue;
     }
     if (arg === "--model") {
@@ -97,16 +113,21 @@ function printHelpAndExit(): never {
   console.log(`pi-ralph
 
 Usage:
-  pi-ralph [--cwd <dir>] [--iterations <n>] [--prompt <file>] [--model <id>] [--thinking <level>] [--show-thinking]
+  pi-ralph [--cwd <dir>] [--iterations <n>] [--prompt <file>] [--plan <file>] [--model <id>] [--thinking <level>] [--show-thinking]
 
 Options:
   --cwd <dir>           Working directory for the feature repo (default: current dir)
   --iterations <n>      Maximum Ralph iterations (default: 10)
-  --prompt <file>       Prompt file to use (default: prompts/ralph-loop.md)
+  --prompt <file>       Prompt file to use (default: Ralph's built-in prompts/ralph-loop.md)
+  --plan <file>         Plan markdown file (default: auto-detect docs/prds/*_plan.md)
   --model <id>          Override model
   --thinking <level>    Override thinking level
   --show-thinking       Stream thinking deltas to stdout
   -h, --help            Show help
+
+Behavior:
+  - Creates one git commit per iteration (allow-empty) in --cwd repository
+  - Requires a clean working tree at loop start and before each iteration
 `);
   process.exit(0);
 }
@@ -116,20 +137,19 @@ async function readPrompt(promptPath: string): Promise<string> {
   return prompt.trim();
 }
 
-async function ensureProjectFiles(cwd: string): Promise<void> {
-  const prdPath = path.join(cwd, "prd.json");
-  const progressPath = path.join(cwd, "progress.txt");
-
+async function ensureProjectFiles(planPath: string): Promise<void> {
   try {
-    await fs.access(prdPath);
+    await fs.access(planPath);
   } catch {
-    throw new Error(`Missing required file: ${prdPath}`);
+    throw new Error(`Missing required plan file: ${planPath}`);
   }
 
-  try {
-    await fs.access(progressPath);
-  } catch {
-    await fs.writeFile(progressPath, "# Ralph Progress Log\nStarted: " + new Date().toISOString() + "\n---\n");
+  const planContent = await fs.readFile(planPath, "utf8");
+
+  if (!/^##\s+Ralph Progress Log\s*$/im.test(planContent)) {
+    throw new Error(
+      `Plan file ${planPath} is missing required section: \"## Ralph Progress Log\". Add it to the plan before running Ralph.`,
+    );
   }
 }
 
@@ -166,10 +186,93 @@ function resolveModelFromArg(modelArg?: string) {
   return model;
 }
 
+async function runGit(cwd: string, args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync("git", args, { cwd });
+  return stdout.trim();
+}
+
+async function assertGitRepo(cwd: string): Promise<void> {
+  const output = await runGit(cwd, ["rev-parse", "--is-inside-work-tree"]);
+  if (output !== "true") {
+    throw new Error(`${cwd} is not a git repository.`);
+  }
+}
+
+async function assertWorkingTreeClean(cwd: string): Promise<void> {
+  const status = await runGit(cwd, ["status", "--porcelain"]);
+  if (status.length > 0) {
+    throw new Error(
+      "Working tree is not clean. Commit or stash existing changes before running Ralph so each iteration commit is isolated.",
+    );
+  }
+}
+
+function summarizeAgentOutput(assistantText: string): string {
+  const lines = assistantText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  if (lines.length === 0) {
+    return "(no agent summary captured)";
+  }
+
+  const summary = lines.slice(-8).join(" ").replace(/\s+/g, " ").trim();
+  if (summary.length <= 600) {
+    return summary;
+  }
+
+  return `${summary.slice(0, 597)}...`;
+}
+
+async function commitIteration(opts: {
+  cwd: string;
+  iteration: number;
+  targetStoryId: string;
+  targetStoryTitle: string;
+  storyStatusAfter: string;
+  planPath: string;
+  assistantText: string;
+}): Promise<void> {
+  const { cwd, iteration, targetStoryId, targetStoryTitle, storyStatusAfter, planPath, assistantText } = opts;
+
+  await runGit(cwd, ["add", "-A"]);
+
+  const subject = `ralph(${targetStoryId}): ${storyStatusAfter} - ${targetStoryTitle}`;
+  const summary = summarizeAgentOutput(assistantText);
+  const body = [
+    `Iteration: ${iteration}`,
+    `Plan: ${planPath}`,
+    `Story: ${targetStoryId}`,
+    `Status: ${storyStatusAfter}`,
+    "",
+    `Summary: ${summary}`,
+  ].join("\n");
+
+  await runGit(cwd, ["commit", "--allow-empty", "-m", subject, "-m", body]);
+}
+
+function buildIterationPrompt(basePrompt: string, planPath: string, targetStory: string): string {
+  return `${basePrompt}
+
+Runtime context:
+- Plan file: ${planPath}
+- Use the \"## Ralph Queue\" table as source of truth for story status.
+- Story statuses: todo, in_progress, blocked, done.
+- \`blocked_by\` is a comma-separated list of story ids that must be done first.
+- Focus only on this target story this iteration: ${targetStory}
+- Use the \"## Ralph Progress Log\" section in the plan for iteration notes.
+- When a story is complete, set its status to \`done\` in the Ralph Queue table and append learnings to the Ralph Progress Log section.
+- If a story is partially complete, keep status as \`in_progress\` and append clear progress/blockers to the Ralph Progress Log section.`;
+}
+
 async function main(): Promise<number> {
   const opts = parseArgs(process.argv.slice(2));
   const prompt = await readPrompt(opts.promptPath);
-  await ensureProjectFiles(opts.cwd);
+  const planPath = await resolvePlanPath(opts.cwd, opts.planPath);
+  await ensureProjectFiles(planPath);
+  await assertGitRepo(opts.cwd);
+  await assertWorkingTreeClean(opts.cwd);
   const selectedModel = resolveModelFromArg(opts.model);
 
   const authStorage = AuthStorage.create();
@@ -183,15 +286,39 @@ async function main(): Promise<number> {
 
   writeLine(`Ralph loop starting in ${opts.cwd}`);
   writeLine(`Prompt: ${opts.promptPath}`);
+  writeLine(`Plan: ${planPath}`);
   writeLine(`Iterations: ${opts.iterations}`);
   if (opts.model) writeLine(`Model: ${opts.model}`);
   if (opts.thinkingLevel) writeLine(`Thinking: ${opts.thinkingLevel}`);
 
   for (let iteration = 1; iteration <= opts.iterations; iteration += 1) {
+    await assertWorkingTreeClean(opts.cwd);
+    const queueBefore = await loadPlanQueue(planPath);
+
+    if (queueBefore.allDone) {
+      writeLine("");
+      writeLine("Ralph completed all tasks (all stories are done in the plan queue).");
+      return 0;
+    }
+
+    if (queueBefore.runnableStories.length === 0) {
+      writeLine("");
+      writeLine("No runnable stories remain. Remaining stories are blocked.");
+      writeLine(formatBlockedSummary(queueBefore));
+      return 1;
+    }
+
     writeLine("");
     writeLine("===============================================================");
     writeLine(`  Ralph iteration ${iteration} of ${opts.iterations}`);
     writeLine("===============================================================");
+
+    const targetStory = queueBefore.runnableStories[0]!;
+    writeLine(
+      `Target story: ${targetStory.id} (priority ${targetStory.priority}) - ${targetStory.title}${
+        targetStory.blockedBy.length > 0 ? ` [blocked_by: ${targetStory.blockedBy.join(",")}]` : ""
+      }`,
+    );
 
     const sessionManager = SessionManager.inMemory();
     const { session } = await createAgentSession({
@@ -248,16 +375,36 @@ async function main(): Promise<number> {
     });
 
     try {
-      await session.prompt(prompt);
+      await session.prompt(buildIterationPrompt(prompt, planPath, targetStory.id));
     } finally {
       unsubscribe();
       session.dispose();
     }
 
-    if (isCompleteMarker(assistantText)) {
+    const queueAfter = await loadPlanQueue(planPath);
+    const targetAfter = queueAfter.stories.find((story) => story.id === targetStory.id);
+    const statusAfter = targetAfter?.status ?? "unknown";
+
+    await commitIteration({
+      cwd: opts.cwd,
+      iteration,
+      targetStoryId: targetStory.id,
+      targetStoryTitle: targetStory.title,
+      storyStatusAfter: statusAfter,
+      planPath,
+      assistantText,
+    });
+    writeLine(`Committed iteration ${iteration} as git commit (story ${targetStory.id}, status ${statusAfter}).`);
+
+    if (queueAfter.allDone) {
       writeLine("");
       writeLine("Ralph completed all tasks.");
       return 0;
+    }
+
+    if (isCompleteMarker(assistantText)) {
+      writeLine("");
+      writeLine("Received COMPLETE marker, but queue still has unfinished stories. Continuing.");
     }
 
     writeLine(`Iteration ${iteration} complete; continuing.`);
